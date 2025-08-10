@@ -1,0 +1,10 @@
+streamlit
+python-docx>=0.8.11
+google-ai-generativelanguage>=0.6.10
+scikit-learn>=1.2.0
+pandas>=2.0.0
+tqdm
+python-multipart
+lxml
+# faiss-cpu==1.7.4
+
