@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timezone
 from typing import List, Dict
 import time
+import pandas as pd
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -438,7 +439,11 @@ def create_annotated_docx(original_bytes: bytes, flags_report: List[Dict]) -> by
         
         # Add timestamp
         timestamp_para = doc.add_paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        timestamp_para.style.font.size = Pt(10) if hasattr(timestamp_para.style.font, 'size') else None
+        try:
+            if hasattr(timestamp_para.style, 'font') and hasattr(timestamp_para.style.font, 'size'):
+                timestamp_para.style.font.size = Pt(10)
+        except Exception:
+            pass
         
         doc.add_paragraph()  # Empty line
         
@@ -509,7 +514,7 @@ def analyze_document_text(docname: str, text: str) -> List[Dict]:
         issues.append({
             "document": docname,
             "paragraph_index": paragraph_index,
-            "location_hint": f"Paragraph {paragraph_index + 1}" if paragraph_index > 0 else "Jurisdiction clause",
+            "location_hint": f"Paragraph {paragraph_index + 1}" if paragraph_index >= 0 else "Jurisdiction clause",
             "issue": flag,
             "severity": "High",
             "suggestion": "Replace reference to UAE Federal Courts with ADGM Courts and specify ADGM jurisdiction."
@@ -520,7 +525,7 @@ def analyze_document_text(docname: str, text: str) -> List[Dict]:
     for flag in signatory_flags:
         issues.append({
             "document": docname,
-            "paragraph_index": len(paragraphs) - 1,
+            "paragraph_index": len(paragraphs) - 1 if paragraphs else 0,
             "location_hint": "End of document",
             "issue": flag,
             "severity": "Medium",
@@ -631,8 +636,8 @@ if uploaded:
         
         for i, uploaded_file in enumerate(uploaded):
             # Update progress
-            progress = (i + 1) / total_files
-            progress_bar.progress(progress)
+            progress = int(((i + 1) / total_files) * 100)
+            progress_bar.progress(progress / 100.0)
             
             with status_placeholder:
                 st.markdown(f'<div class="status-text">📄 Processing {uploaded_file.name}... ({i+1}/{total_files})</div>', unsafe_allow_html=True)
@@ -689,7 +694,7 @@ if uploaded:
         with status_placeholder:
             st.markdown('<div class="status-text">✅ Analysis complete!</div>', unsafe_allow_html=True)
         
-        time.sleep(1)
+        time.sleep(0.6)
         progress_bar.empty()
         status_placeholder.empty()
     
@@ -773,6 +778,9 @@ if uploaded:
         "📊 **Detailed Analysis**"
     ])
 
+    # ---------------------------
+    # Tab 1: Document Checklist
+    # ---------------------------
     with tab1:
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.markdown("### 📋 **ADGM Compliance Checklist**")
@@ -803,6 +811,9 @@ if uploaded:
         
         st.markdown('</div>', unsafe_allow_html=True)
 
+    # --------------------------------
+    # Tab 2: Issues & Recommendations
+    # --------------------------------
     with tab2:
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.markdown("### ⚠️ **Compliance Issues & Recommendations**")
@@ -868,9 +879,42 @@ if uploaded:
                             </div>
                         </div>
                         ''', unsafe_allow_html=True)
+
+            # ---------------------------
+            # Tab2: Issues Table View
+            # ---------------------------
+            st.markdown("### 🔎 Issues Table")
+            # Build DataFrame for better scanning/exporting
+            issues_df = pd.DataFrame([
+                {
+                    'Document': issue.get('document'),
+                    'Severity': issue.get('severity'),
+                    'SeverityBadge': ("🚨 High" if issue.get('severity') == 'High'
+                                      else "⚠️ Medium" if issue.get('severity') == 'Medium'
+                                      else "ℹ️ Low"),
+                    'Location': issue.get('location_hint'),
+                    'Issue': issue.get('issue'),
+                    'Recommendation': issue.get('suggestion')
+                }
+                for issue in all_issues
+            ])
+            if not issues_df.empty:
+                # show the table (streamlit will render it interactively)
+                st.dataframe(issues_df[['Document', 'SeverityBadge', 'Location', 'Issue', 'Recommendation']], height=300)
+                
+                # CSV download
+                st.download_button(
+                    "📥 Download Issues CSV",
+                    data=issues_df.to_csv(index=False).encode('utf-8'),
+                    file_name=f"adgm_issues_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
         
         st.markdown('</div>', unsafe_allow_html=True)
 
+    # ---------------------------
+    # Tab 3: Reports & Downloads
+    # ---------------------------
     with tab3:
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.markdown("### 📥 **Reports & Download Center**")
@@ -892,9 +936,7 @@ if uploaded:
             
             # CSV Summary Report
             if all_issues:
-                import pandas as pd
-                
-                # Create issues DataFrame
+                # Create issues DataFrame (reuse)
                 issues_df = pd.DataFrame([
                     {
                         'Document': issue['document'],
@@ -952,7 +994,7 @@ if uploaded:
         
         with action_col1:
             if st.button("🔄 **Re-analyze Documents**", help="Run analysis again with current documents"):
-                st.rerun()
+                st.experimental_rerun()
         
         with action_col2:
             if st.button("📋 **Print Checklist**", help="Generate printable checklist"):
@@ -976,6 +1018,9 @@ if uploaded:
         
         st.markdown('</div>', unsafe_allow_html=True)
 
+    # ---------------------------
+    # Tab 4: Detailed Analysis
+    # ---------------------------
     with tab4:
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.markdown("### 📊 **Detailed Analysis Report**")
@@ -1016,6 +1061,19 @@ if uploaded:
         
         # Document-by-document breakdown
         st.markdown("#### 📋 **Document Analysis Breakdown**")
+        
+        # Build a concise summary table
+        summary_rows = []
+        for doc in processed_docs:
+            summary_rows.append({
+                "Filename": doc["filename"],
+                "Type Detected": doc["type_detected"],
+                "Issues Found": len(doc["issues"]),
+                "Text Length": len(doc.get("text_content", "")),
+            })
+        summary_df = pd.DataFrame(summary_rows)
+        if not summary_df.empty:
+            st.dataframe(summary_df, height=220)
         
         for doc in processed_docs:
             with st.expander(f"📄 {doc['filename']} - {doc['type_detected']} ({len(doc['issues'])} issues)"):
